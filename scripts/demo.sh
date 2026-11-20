@@ -39,6 +39,13 @@ done
 banner "Archive view after collection"
 curl -fsS "$ARCHIVE_URL/api/days/$DAY" | jq .
 
+banner "Conditional GET: the cached ETag now revalidates as 304 (no body)"
+etag=$(curl -fsS -D - -o /dev/null "$ARCHIVE_URL/api/days/$DAY" \
+  | awk -F': ' 'tolower($1)=="etag"{print $2}' | tr -d '\r')
+echo "ETag: $etag"
+curl -fsS -o /dev/null -w 'If-None-Match -> HTTP %{http_code}, %{size_download} bytes\n' \
+  -H "If-None-Match: $etag" "$ARCHIVE_URL/api/days/$DAY"
+
 banner "Switch the source to v2"
 curl -fsS -X POST "$SOURCE_URL/v1/admin/version" \
   -H 'content-type: application/json' -d '{"version": "v2"}' | jq .
@@ -62,6 +69,10 @@ done
 banner "Archive view on v2"
 curl -fsS "$ARCHIVE_URL/api/days/$DAY" | jq \
   '{day, day_version, complete, notices: [.notices[].announcement_no], manual_ranges}'
+
+banner "The v1 ETag is now stale: the same request returns 200 with the v2 body"
+curl -fsS -o /dev/null -w 'If-None-Match -> HTTP %{http_code}, %{size_download} bytes\n' \
+  -H "If-None-Match: $etag" "$ARCHIVE_URL/api/days/$DAY"
 
 banner "Swagger UI"
 echo "archive: $ARCHIVE_URL/docs"

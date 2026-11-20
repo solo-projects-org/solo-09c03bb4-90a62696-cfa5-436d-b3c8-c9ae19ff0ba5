@@ -8,6 +8,19 @@ Two kinds of state are stored for a day:
 Splitting a full page only creates frontier rows, so a round that runs out of
 its query budget still makes durable progress and a restart continues from the
 same frontier instead of re-walking the whole day.
+
+A third, derived piece of state supports ``GET /api/days/{day}`` entity tags:
+``day_revisions`` holds a monotonically increasing per-day token.  SQLite
+triggers bump it for exactly those committed writes that change the
+representation the endpoint returns (day version, notices, completed ranges
+and manual ranges).  Frontier-only changes — splitting an interval — do not
+bump it, because the frontier is not part of that representation.
+
+Because the triggers live in the database file, an *older* archive instance
+that keeps writing to the same SQLite file (rolling upgrade) bumps the token
+too: the new instance sees the old instance's commits and invalidates tags that
+clients cached before them.  Triggers are transactional, so a rolled-back write
+does not bump the token either.
 """
 
 from __future__ import annotations
@@ -66,6 +79,8 @@ class DayRecord:
     manual: list[tuple[RangeSpec, str]] = field(default_factory=list)
     notices: list[Notice] = field(default_factory=list)
     frontier: list[FrontierItem] = field(default_factory=list)
+    # Monotonic per-day revision token. ``None`` when the day has no row.
+    revision: int | None = None
 
 
 SCHEMA = """
@@ -122,7 +137,60 @@ CREATE TABLE IF NOT EXISTS notices (
     day_version TEXT NOT NULL,
     PRIMARY KEY (day, announcement_no)
 );
+
+-- Per-day revision token backing the ETag of GET /api/days/{day}.  The token
+-- only moves for writes that change what that endpoint returns.
+CREATE TABLE IF NOT EXISTS day_revisions (
+    day TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL
+);
+
+-- Each trigger below records one committed write to a table that is part of
+-- the day representation.  A new ``days`` row also creates the day.
+CREATE TRIGGER IF NOT EXISTS days_revision_after_insert
+AFTER INSERT ON days
+BEGIN
+    INSERT INTO day_revisions(day, revision) VALUES (NEW.day, 1)
+    ON CONFLICT(day) DO UPDATE SET revision = day_revisions.revision + 1;
+END;
+
+-- ``updated_at``-only touches deliberately do not bump the token.
+CREATE TRIGGER IF NOT EXISTS days_revision_after_version_update
+AFTER UPDATE OF day_version ON days
+WHEN NEW.day_version IS NOT OLD.day_version
+BEGIN
+    INSERT INTO day_revisions(day, revision) VALUES (NEW.day, 1)
+    ON CONFLICT(day) DO UPDATE SET revision = day_revisions.revision + 1;
+END;
+
+-- Settled ranges, manual ranges and notices are part of the representation.
+-- ``frontier_ranges`` intentionally has no trigger: the frontier is derived
+-- from settled ranges and is not part of the day representation, so splitting
+-- a pending interval (or re-seeding the frontier) must not invalidate a tag.
 """
+
+# Per-day revision triggers for the tables that contribute to the JSON body.
+# Generated rather than hand-written so every table gets the same treatment.
+_REVISION_TRIGGER_TABLES = ("completed_ranges", "manual_ranges", "notices")
+
+
+def _revision_triggers() -> str:
+    statements: list[str] = []
+    for table in _REVISION_TRIGGER_TABLES:
+        for action, row in (("INSERT", "NEW"), ("DELETE", "OLD"), ("UPDATE", "NEW")):
+            statements.append(
+                f"""
+CREATE TRIGGER IF NOT EXISTS {table}_revision_after_{action.lower()}
+AFTER {action} ON {table}
+BEGIN
+    INSERT INTO day_revisions(day, revision) VALUES ({row}.day, 1)
+    ON CONFLICT(day) DO UPDATE SET revision = day_revisions.revision + 1;
+END;"""
+            )
+    return "".join(statements)
+
+
+SCHEMA = SCHEMA + _revision_triggers()
 
 
 def _utc_now() -> str:
@@ -142,6 +210,13 @@ class Database:
             conn.executescript(SCHEMA)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.commit()
+            # Backfill revision rows for days created before revision tracking
+            # existed.  ``OR IGNORE`` keeps an already-tracked day's counter.
+            conn.execute(
+                "INSERT OR IGNORE INTO day_revisions(day, revision) "
+                "SELECT day, 1 FROM days"
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -155,14 +230,28 @@ class Database:
     # ------------------------------------------------------------------ reads
 
     def get_day_record(self, day: date) -> DayRecord:
+        """Read one day as a single consistent snapshot.
+
+        The revision token, the version row and the ranges/notices are read
+        inside one deferred transaction.  In WAL mode that pins the snapshot at
+        the first read, so a concurrent commit can never produce a response
+        whose ETag describes a different state than its body.
+        """
         day_text = day.isoformat()
         conn = self._connect()
         try:
+            conn.execute("BEGIN")
             row = conn.execute(
                 "SELECT day_version FROM days WHERE day = ?", (day_text,)
             ).fetchone()
             if row is None:
+                conn.commit()
                 return DayRecord(day=day, day_version=None)
+
+            revision_row = conn.execute(
+                "SELECT revision FROM day_revisions WHERE day = ?", (day_text,)
+            ).fetchone()
+            revision = revision_row["revision"] if revision_row is not None else None
 
             completed = [
                 RangeSpec(r["start_minute"], r["end_minute"])
@@ -206,6 +295,10 @@ class Database:
                     (day_text,),
                 )
             ]
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
         return DayRecord(
@@ -215,7 +308,36 @@ class Database:
             manual=manual,
             notices=notices,
             frontier=frontier,
+            revision=revision,
         )
+
+    def day_revision(self, day: date) -> tuple[bool, int | None]:
+        """Cheap existence/revision lookup used for conditional requests.
+
+        Returns ``(exists, revision)``.  It touches only the two small metadata
+        tables, never notices or range details, and performs no write, so a
+        matching ``If-None-Match`` can be answered with ``304`` cheaply.
+        """
+        day_text = day.isoformat()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN")
+            row = conn.execute(
+                "SELECT 1 FROM days WHERE day = ?", (day_text,)
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return (False, None)
+            revision_row = conn.execute(
+                "SELECT revision FROM day_revisions WHERE day = ?", (day_text,)
+            ).fetchone()
+            conn.commit()
+            return (True, revision_row["revision"] if revision_row is not None else None)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------- version gate
 

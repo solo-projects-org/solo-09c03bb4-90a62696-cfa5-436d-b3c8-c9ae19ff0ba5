@@ -5,11 +5,12 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 
 from app.collector import Collector, DayBusy, RoundResult
 from app.config import settings
 from app.db import Database
+from app.etag import if_none_match_matches, tag_for_state, tag_for_unseen_day
 from app.schemas import (
     CollectRequest,
     CollectResponse,
@@ -125,14 +126,72 @@ def run_round(payload: CollectRequest) -> CollectResponse:
     return _round_payload(result)
 
 
-@app.get("/api/days/{day}", response_model=DayCoverageOut)
-def day_coverage(day: str) -> DayCoverageOut:
+@app.get(
+    "/api/days/{day}",
+    response_model=DayCoverageOut,
+    responses={
+        200: {
+            "description": "Day coverage",
+            "headers": {
+                "ETag": {
+                    "description": (
+                        "Strong entity tag for this committed day state. Send it "
+                        "back as If-None-Match to receive 304 when unchanged."
+                    ),
+                    "schema": {"type": "string"},
+                }
+            },
+        },
+        304: {"description": "The cached representation is still current"},
+    },
+)
+def day_coverage(
+    day: str,
+    response: Response,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> DayCoverageOut | Response:
     parsed = _parse_day(day)
     state = archive()
+
+    # Cheap path: classify the day from metadata only.  A day that has never
+    # been collected still has a well-defined representation, so it gets a
+    # stable tag too and can be answered with 304.
+    exists, revision = state.db.day_revision(parsed)
+    if exists:
+        current_tag = tag_for_state(day, revision)
+    else:
+        current_tag = tag_for_unseen_day(day)
+
+    if if_none_match_matches(if_none_match, current_tag):
+        return Response(
+            status_code=304,
+            headers={"ETag": current_tag, "Cache-Control": "no-cache"},
+        )
+
     record = state.db.get_day_record(parsed)
+
+    # The body and its tag must come from one committed snapshot.  Derive the
+    # final tag from the record just read, never from the earlier metadata-only
+    # lookup (a day may have appeared in between).  When the snapshot differs
+    # from what the client holds, the body itself is the revalidation answer.
+    snapshot_tag = (
+        tag_for_unseen_day(day)
+        if record.day_version is None
+        else tag_for_state(day, record.revision)
+    )
+    if snapshot_tag != current_tag and if_none_match_matches(
+        if_none_match, snapshot_tag
+    ):
+        # The body we just loaded is exactly what the client already has.
+        return Response(
+            status_code=304,
+            headers={"ETag": snapshot_tag, "Cache-Control": "no-cache"},
+        )
+    current_tag = snapshot_tag
+
     completed, manual_merged = state.db.coverage(record)
     pending = state.db.pending_ranges(record)
-    return DayCoverageOut(
+    body = DayCoverageOut(
         day=day,
         day_version=record.day_version,
         complete=not pending and not manual_merged,
@@ -155,6 +214,13 @@ def day_coverage(day: str) -> DayCoverageOut:
             for r, reason in record.manual
         ],
     )
+
+    # The representation can change at any committed write, so caches must
+    # revalidate.  Revalidation is cheap: a match costs two small metadata
+    # reads and no body materialisation.
+    response.headers["ETag"] = current_tag
+    response.headers["Cache-Control"] = "no-cache"
+    return body
 
 
 @app.get("/api/days/{day}/version")
