@@ -1,0 +1,53 @@
+name: eia-archive
+
+services:
+  source:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - uvicorn
+      - source.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    environment:
+      # Swap the dataset without rebuilding: v1 or v2.
+      SOURCE_DATASET: ${SOURCE_DATASET:-v1}
+      SOURCE_DATA_DIR: /data/datasets
+    volumes:
+      - ./datasets:/data/datasets:ro
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  archive:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    environment:
+      ARCHIVE_DB_PATH: /data/archive.sqlite3
+      SOURCE_BASE_URL: http://source:8080
+      MAX_ROUND_QUERIES: "6"
+    volumes:
+      - archive-data:/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      source:
+        condition: service_healthy
+
+volumes:
+  archive-data:

@@ -1,0 +1,98 @@
+{
+  "label": "v1",
+  "description": "First publication of the 2026-11-18..21 disclosure batch.",
+  "days": {
+    "2026-11-18": [],
+    "2026-11-19": [
+      {
+        "announcement_no": "HB-EIA-2026-1119-01",
+        "title": "云岭风电场二期工程环境影响报告书公示",
+        "published_at": "2026-11-19T08:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1119-02",
+        "title": "青石镇污水处理厂提标改造竣工验收公示",
+        "published_at": "2026-11-19T12:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1119-03",
+        "title": "临港物流园噪声污染防治措施变更公示",
+        "published_at": "2026-11-19T16:30:00Z"
+      }
+    ],
+    "2026-11-20": [
+      {
+        "announcement_no": "HB-EIA-2026-1120-01",
+        "title": "滨江化工园区污水处理站提标改造公示",
+        "published_at": "2026-11-20T09:12:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-02",
+        "title": "滨江化工园区雨排口在线监测设备验收公示",
+        "published_at": "2026-11-20T09:12:05Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-03",
+        "title": "滨江化工园区事故应急池扩容公示",
+        "published_at": "2026-11-20T09:12:11Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-04",
+        "title": "滨江化工园区危废暂存间整改公示",
+        "published_at": "2026-11-20T09:12:17Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-05",
+        "title": "滨江化工园区初期雨水收集工程公示",
+        "published_at": "2026-11-20T09:12:23Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-06",
+        "title": "东岭矿区生态修复方案公示",
+        "published_at": "2026-11-20T10:05:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-07",
+        "title": "环城高速改扩建工程声环境专项公示",
+        "published_at": "2026-11-20T14:30:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-08",
+        "title": "环城高速改扩建工程大气环境专项公示",
+        "published_at": "2026-11-20T14:30:40Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1120-09",
+        "title": "北岸垃圾中转站迁建工程公示",
+        "published_at": "2026-11-20T18:45:00Z"
+      }
+    ],
+    "2026-11-21": [
+      {
+        "announcement_no": "HB-EIA-2026-1121-01",
+        "title": "南湖湿地保护修复项目公示",
+        "published_at": "2026-11-21T06:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1121-02",
+        "title": "西郊变电站扩建工程公示",
+        "published_at": "2026-11-21T07:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1121-03",
+        "title": "高新区中水回用管网工程公示",
+        "published_at": "2026-11-21T12:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1121-04",
+        "title": "老城区雨污分流改造公示",
+        "published_at": "2026-11-21T13:00:00Z"
+      },
+      {
+        "announcement_no": "HB-EIA-2026-1121-05",
+        "title": "桃李乡养殖场粪污处理设施公示",
+        "published_at": "2026-11-21T20:00:00Z"
+      }
+    ]
+  }
+}
